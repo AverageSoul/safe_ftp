@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 FTP Client-Server Implementation
 ===========
 Simple implementation of a file transfer program. It includes custom client and server programs that provide functionality to authenticate a user, list remote files, and retrieve remote files.
@@ -57,3 +58,6 @@ Logging In:
 	Name: anonymous
 	Password: [empty]
 ```
+=======
+# safe_ftp
+>>>>>>> 4c27d1057ef684983852ee7fa7321670b6a60067
