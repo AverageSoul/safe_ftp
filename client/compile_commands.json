@@ -1,0 +1,32 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Wall",
+      "-g",
+      "-Os",
+      "-o",
+      "ftclient.o",
+      "ftclient.c"
+    ],
+    "directory": "/home/juicymio/code/crypto/ftp/client",
+    "file": "/home/juicymio/code/crypto/ftp/client/ftclient.c",
+    "output": "/home/juicymio/code/crypto/ftp/client/ftclient.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Wall",
+      "-g",
+      "-Os",
+      "-o",
+      "../common/common.o",
+      "../common/common.c"
+    ],
+    "directory": "/home/juicymio/code/crypto/ftp/client",
+    "file": "/home/juicymio/code/crypto/ftp/common/common.c",
+    "output": "/home/juicymio/code/crypto/ftp/common/common.o"
+  }
+]
