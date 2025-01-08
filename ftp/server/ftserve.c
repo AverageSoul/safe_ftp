@@ -1,6 +1,12 @@
 #include "ftserve.h"
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+
+#include "ecdh/ecdh.h"
+#include "ecdh/ecdh_protocol.h"
+#include "ecdsa/ecdsa.h"
+#include "sha256/sha256.h"
 const char root_path[] = "./uploads/";
 int main(int argc, char *argv[]) {
   int sock_listen, sock_control, port, pid;
@@ -318,6 +324,68 @@ void ftserve_process(int sock_control) {
   // TODO: Sign
   // TODO:: key exchange
 
+  ECurve curve;
+  ec_init_curve(&curve);
+
+  // 设置曲线参数
+  mpz_set_str(
+      curve.p,
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16);
+  mpz_set_ui(curve.a, 0);
+  mpz_set_ui(curve.b, 7);
+  mpz_set_str(
+      curve.n,
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
+
+  // 设置基点G
+  mpz_set_str(
+      curve.G.x,
+      "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798", 16);
+  mpz_set_str(
+      curve.G.y,
+      "483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8", 16);
+  curve.G.infinity = 0;
+
+  // Alice的密钥对
+  mpz_t alice_private;
+  ECPoint alice_public;
+  mpz_init(alice_private);
+  ec_init_point(&alice_public);
+
+  generate_keypair(alice_private, &alice_public, &curve);
+
+  // 计算共享密钥
+  mpz_t alice_shared;
+  mpz_init(alice_shared);
+  ECPoint bob_public;
+  ec_init_point(&bob_public);
+
+  unsigned char buf[512];
+  size_t length = 67; // TODO: calc this
+
+  if (recv(sock_control, buf, length, 0) < 0) {
+    perror("exchange key: recv key error\n");
+    return;
+  }
+
+  deserialize_ecpoint(&bob_public, buf, length);
+
+  // FIXME: receive failed
+  gmp_printf("client public: %Zx %Zx\n", bob_public.x, bob_public.y);
+
+  serialize_ecpoint(&alice_public, buf, &length);
+
+  if (send(sock_control, buf, length, 0) < 0) {
+    close(sock_control);
+    printf("exchange key: send public failed\n");
+    exit(1);
+  }
+  printf("computing shared secret...\n");
+  compute_shared_secret(alice_shared, &bob_public, alice_private, &curve);
+  printf("key exchanged successfully\n");
+
+  // 验证共享密钥是否相同
+  gmp_printf("Shared secret: %Zx\n", alice_shared);
   while (1) {
     // Wait for command
     int rc = ftserve_recv_cmd(sock_control, cmd, arg);
