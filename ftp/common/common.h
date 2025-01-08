@@ -73,8 +73,3 @@ void trimstr(char *str, int n);
 void read_input(char *buffer, int size);
 
 #endif
-
-void deserialize_ecpoint(ECPoint *point, const unsigned char *buffer,
-                         size_t length);
-void serialize_ecpoint(const ECPoint *point, unsigned char *buffer,
-                       size_t *length);

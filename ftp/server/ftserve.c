@@ -360,22 +360,20 @@ void ftserve_process(int sock_control) {
   ECPoint bob_public;
   ec_init_point(&bob_public);
 
-  unsigned char buf[512];
-  size_t length = 67; // TODO: calc this
+  uint8_t public[65];
+  size_t length = sizeof(public);
 
-  if (recv(sock_control, buf, length, 0) < 0) {
+  printf("receiving public...\n");
+  if (recv(sock_control, public, length, 0) < 0) {
     perror("exchange key: recv key error\n");
     return;
   }
 
-  deserialize_ecpoint(&bob_public, buf, length);
+  ecdh_deserialize_pubkey(&curve, &bob_public, public, sizeof(public));
+  gmp_printf("received client public: %Zx %Zx\n", bob_public.x, bob_public.y);
 
-  // FIXME: receive failed
-  gmp_printf("client public: %Zx %Zx\n", bob_public.x, bob_public.y);
-
-  serialize_ecpoint(&alice_public, buf, &length);
-
-  if (send(sock_control, buf, length, 0) < 0) {
+  ecdh_serialize_pubkey(&alice_public, public, sizeof(public));
+  if (send(sock_control, public, length, 0) < 0) {
     close(sock_control);
     printf("exchange key: send public failed\n");
     exit(1);

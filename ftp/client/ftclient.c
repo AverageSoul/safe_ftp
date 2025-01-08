@@ -344,28 +344,27 @@ int main(int argc, char *argv[]) {
 
   printf("sending public...\n");
   gmp_printf("client public: %Zx %Zx\n", bob_public.x, bob_public.y);
-  unsigned char buf[512];
-  size_t length;
-  serialize_ecpoint(&bob_public, buf, &length);
+  uint8_t public[65];
+  size_t length = sizeof(public);
 
-  if (send(sock_control, buf, length, 0) < 0) {
+  ecdh_serialize_pubkey(&bob_public, public, sizeof(public));
+  if (send(sock_control, public, length, 0) < 0) {
     close(sock_control);
     printf("exchange key: send public failed\n");
     exit(1);
   }
   printf("receiving public...\n");
-  if (recv(sock_control, buf, length, 0) < 0) {
+  if (recv(sock_control, public, length, 0) < 0) {
     perror("exchange key: recv key error\n");
     return -1;
   }
 
-  deserialize_ecpoint(&alice_public, buf, length);
+  ecdh_deserialize_pubkey(&curve, &alice_public, public, sizeof(public));
   gmp_printf("server public: %Zx %Zx\n", alice_public.x, alice_public.y);
   compute_shared_secret(bob_shared, &alice_public, bob_private, &curve);
   printf("secret shared successfully\n");
   gmp_printf("Shared secret: %Zx\n", bob_shared);
   while (1) { // loop until user types quit
-
     // Get a command from user
     if (ftclient_read_command(buffer, sizeof buffer, &cmd) < 0) {
       printf("Invalid command\n");
