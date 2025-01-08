@@ -72,4 +72,9 @@ void trimstr(char *str, int n);
  */
 void read_input(char *buffer, int size);
 
+void init_curve(ECurve *curve);
+
+void split_mpz_t(mpz_t shared, unsigned char *high, unsigned char *low);
+
+void print_bytes(const unsigned char *data, size_t size);
 #endif

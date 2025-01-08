@@ -3,11 +3,14 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "aes/aes.h"
+#include "aes/aes_cfb.h"
 #include "ecdh/ecdh.h"
 #include "ecdh/ecdh_protocol.h"
 #include "ecdsa/ecdsa.h"
 #include "sha256/sha256.h"
 const char root_path[] = "./uploads/";
+
 int main(int argc, char *argv[]) {
   int sock_listen, sock_control, port, pid;
 
@@ -56,10 +59,21 @@ int main(int argc, char *argv[]) {
 // TODO: Encrypt
 void ftserve_retr(int sock_control, int sock_data, char *filename) {
   FILE *fd = NULL;
-  char data[MAXSIZE];
+  unsigned char data[MAXSIZE];
+  unsigned char cipher[MAXSIZE];
+  unsigned char key[AES_KEY_SIZE];
+  unsigned char iv[AES_KEY_SIZE];
   size_t num_read;
+  char filepath[MAXSIZE + 10];
+  strcpy(filepath, root_path);
 
-  fd = fopen(filename, "r");
+  if (strchr(filename, '/')) {
+    send_response(sock_control, 550);
+    return;
+  }
+  strncat(filepath, filename, 512);
+
+  fd = fopen(filepath, "r");
 
   if (!fd) {
     // send error code (550 Requested action not taken)
@@ -69,6 +83,17 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
     // send okay (150 File status okay)
     send_response(sock_control, 150);
 
+    mpz_t shared;
+    server_exchange_key(&shared, sock_control);
+    split_mpz_t(shared, key, iv);
+    printf("key: ");
+    print_bytes(key, AES_KEY_SIZE);
+    puts("");
+
+    printf("iv: ");
+    print_bytes(iv, AES_KEY_SIZE);
+    puts("");
+
     do {
       num_read = fread(data, 1, MAXSIZE, fd);
 
@@ -76,8 +101,13 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
         printf("error in fread()\n");
       }
 
+      aes_cfb_encrypt(data, num_read, key, iv, cipher);
+
+      printf("cipher: ");
+      print_bytes(cipher, num_read);
+      puts("");
       // send block
-      if (send(sock_data, data, num_read, 0) < 0)
+      if (send(sock_data, cipher, num_read, 0) < 0)
         perror("error sending file\n");
 
     } while (num_read > 0);
@@ -300,30 +330,7 @@ int ftserve_recv_cmd(int sock_control, char *cmd, char *arg) {
   return rc;
 }
 
-/**
- * Child process handles connection to client
- */
-void ftserve_process(int sock_control) {
-  int sock_data;
-  char cmd[5];
-  char arg[MAXSIZE];
-
-  // Send welcome message
-  send_response(sock_control, 220);
-
-  // Authenticate user
-  /*
-        if (ftserve_login(sock_control) == 1) {
-                send_response(sock_control, 230);
-        } else {
-                send_response(sock_control, 430);
-                exit(0);
-        }
-  */
-
-  // TODO: Sign
-  // TODO:: key exchange
-
+int server_exchange_key(mpz_t *shared, int sock_control) {
   ECurve curve;
   ec_init_curve(&curve);
 
@@ -366,7 +373,7 @@ void ftserve_process(int sock_control) {
   printf("receiving public...\n");
   if (recv(sock_control, public, length, 0) < 0) {
     perror("exchange key: recv key error\n");
-    return;
+    return -1;
   }
 
   ecdh_deserialize_pubkey(&curve, &bob_public, public, sizeof(public));
@@ -384,6 +391,33 @@ void ftserve_process(int sock_control) {
 
   // 验证共享密钥是否相同
   gmp_printf("Shared secret: %Zx\n", alice_shared);
+  mpz_set(*shared, alice_shared);
+
+  return 0;
+}
+/**
+ * Child process handles connection to client
+ */
+void ftserve_process(int sock_control) {
+  int sock_data;
+  char cmd[5];
+  char arg[MAXSIZE];
+
+  // Send welcome message
+  send_response(sock_control, 220);
+
+  // Authenticate user
+  /*
+        if (ftserve_login(sock_control) == 1) {
+                send_response(sock_control, 230);
+        } else {
+                send_response(sock_control, 430);
+                exit(0);
+        }
+  */
+
+  // TODO: Sign
+
   while (1) {
     // Wait for command
     int rc = ftserve_recv_cmd(sock_control, cmd, arg);

@@ -16,6 +16,7 @@
 #define FTSERVE_H
 
 #include "../common/common.h"
+#include <gmp.h>
 
 /**
  * Send file specified in filename over data connection, sending
@@ -61,4 +62,6 @@ int ftserve_recv_cmd(int sock_control, char *cmd, char *arg);
 void ftserve_process(int sock_control);
 
 void ftserve_put(int sock_control, int sock_data, char *filename);
+
+int server_exchange_key(mpz_t *shared, int sock_control);
 #endif

@@ -65,4 +65,6 @@ int ftclient_send_cmd(struct command *cmd);
 void ftclient_login();
 
 int ftclient_put(int data_sock, int sock_control, char *arg);
+
+int client_exchange_key(mpz_t *shared);
 #endif

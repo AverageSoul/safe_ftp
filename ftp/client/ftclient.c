@@ -1,4 +1,6 @@
 #include "ftclient.h"
+#include "aes/aes.h"
+#include "aes/aes_cfb.h"
 #include "ecdh/ecdh.h"
 #include "ecdh/ecdh_protocol.h"
 #include "ecdsa/ecdsa.h"
@@ -92,11 +94,31 @@ int ftclient_read_command(char *buf, int size, struct command *cstruct) {
  * Do get <filename> command
  */
 int ftclient_get(int data_sock, int sock_control, char *arg) {
-  char data[MAXSIZE];
+  unsigned char data[MAXSIZE];
+  unsigned char cipher[MAXSIZE];
+  unsigned char key[AES_KEY_SIZE];
+  unsigned char iv[AES_KEY_SIZE];
   int size;
+
+  mpz_t shared;
+  client_exchange_key(&shared);
   FILE *fd = fopen(arg, "w");
 
-  while ((size = recv(data_sock, data, MAXSIZE, 0)) > 0) {
+  split_mpz_t(shared, key, iv);
+  while ((size = recv(data_sock, cipher, MAXSIZE, 0)) > 0) {
+    aes_cfb_decrypt(cipher, size, key, iv, data);
+    printf("received cipher: ");
+    print_bytes(cipher, size);
+    puts("");
+    printf("key: ");
+    print_bytes(key, AES_KEY_SIZE);
+    puts("");
+    printf("iv: ");
+    print_bytes(iv, AES_KEY_SIZE);
+    puts("");
+    printf("data: ");
+    print_bytes(data, size);
+    puts("");
     fwrite(data, 1, size, fd);
   }
 
@@ -250,6 +272,53 @@ int ftclient_put(int data_sock, int sock_control, char *arg) {
   fclose(fd);
   return 0;
 }
+
+int client_exchange_key(mpz_t *shared) {
+  printf("key exchange begins\n");
+  ECurve curve;
+  init_curve(&curve);
+  printf("curve inited successfully\n");
+  // Bob的密钥对
+  mpz_t bob_private;
+  ECPoint bob_public;
+  mpz_init(bob_private);
+  ec_init_point(&bob_public);
+  generate_keypair(bob_private, &bob_public, &curve);
+
+  mpz_t bob_shared;
+  mpz_init(bob_shared);
+
+  printf("keypair generated successfully\n");
+  ECPoint alice_public;
+  ec_init_point(&alice_public);
+
+  printf("sending public...\n");
+  gmp_printf("client public: %Zx %Zx\n", bob_public.x, bob_public.y);
+  uint8_t public[PUBKEY_SERIALIZED_LEN];
+  size_t length = sizeof(public);
+
+  ecdh_serialize_pubkey(&bob_public, public, sizeof(public));
+  if (send(sock_control, public, length, 0) < 0) {
+    close(sock_control);
+    printf("exchange key: send public failed\n");
+    exit(1);
+  }
+  printf("receiving public...\n");
+  if (recv(sock_control, public, length, 0) < 0) {
+    perror("exchange key: recv key error\n");
+    return -1;
+  }
+
+  ecdh_deserialize_pubkey(&curve, &alice_public, public, sizeof(public));
+  gmp_printf("server public: %Zx %Zx\n", alice_public.x, alice_public.y);
+  compute_shared_secret(bob_shared, &alice_public, bob_private, &curve);
+  printf("secret shared successfully\n");
+  gmp_printf("Shared secret: %Zx\n", bob_shared);
+  mpz_set(*shared, bob_shared);
+
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   int data_sock, retcode, s;
   char buffer[MAXSIZE];
@@ -302,68 +371,6 @@ int main(int argc, char *argv[]) {
   */
 
   // TODO: Sign
-  // Key exchange
-  printf("key exchange begins\n");
-  ECurve curve;
-  ec_init_curve(&curve);
-
-  // 设置曲线参数
-  mpz_set_str(
-      curve.p,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16);
-  mpz_set_ui(curve.a, 0);
-  mpz_set_ui(curve.b, 7);
-  mpz_set_str(
-      curve.n,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
-
-  // 设置基点G
-  mpz_set_str(
-      curve.G.x,
-      "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798", 16);
-  mpz_set_str(
-      curve.G.y,
-      "483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8", 16);
-  curve.G.infinity = 0;
-
-  printf("curve inited successfully\n");
-  // Bob的密钥对
-  mpz_t bob_private;
-  ECPoint bob_public;
-  mpz_init(bob_private);
-  ec_init_point(&bob_public);
-  generate_keypair(bob_private, &bob_public, &curve);
-
-  mpz_t bob_shared;
-  mpz_init(bob_shared);
-  // mpz_init(bob_shared);
-
-  printf("keypair generated successfully\n");
-  ECPoint alice_public;
-  ec_init_point(&alice_public);
-
-  printf("sending public...\n");
-  gmp_printf("client public: %Zx %Zx\n", bob_public.x, bob_public.y);
-  uint8_t public[65];
-  size_t length = sizeof(public);
-
-  ecdh_serialize_pubkey(&bob_public, public, sizeof(public));
-  if (send(sock_control, public, length, 0) < 0) {
-    close(sock_control);
-    printf("exchange key: send public failed\n");
-    exit(1);
-  }
-  printf("receiving public...\n");
-  if (recv(sock_control, public, length, 0) < 0) {
-    perror("exchange key: recv key error\n");
-    return -1;
-  }
-
-  ecdh_deserialize_pubkey(&curve, &alice_public, public, sizeof(public));
-  gmp_printf("server public: %Zx %Zx\n", alice_public.x, alice_public.y);
-  compute_shared_secret(bob_shared, &alice_public, bob_private, &curve);
-  printf("secret shared successfully\n");
-  gmp_printf("Shared secret: %Zx\n", bob_shared);
   while (1) { // loop until user types quit
     // Get a command from user
     if (ftclient_read_command(buffer, sizeof buffer, &cmd) < 0) {

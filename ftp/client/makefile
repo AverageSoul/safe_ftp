@@ -15,7 +15,9 @@ CRYPTO_UTILS_PATH = ../../crypto_utils/
 CRYPTO_UTILS_LIBS = $(CRYPTO_UTILS_PATH)/build/ecdh/ecdh.o \
 										$(CRYPTO_UTILS_PATH)/build/ecdh/ecdh_protocol.o \
 										$(CRYPTO_UTILS_PATH)/build/ecdsa/ecdsa.o \
-										$(CRYPTO_UTILS_PATH)/build/sha256/sha256.o
+										$(CRYPTO_UTILS_PATH)/build/sha256/sha256.o \
+										$(CRYPTO_UTILS_PATH)/build/aes/aes.o \
+										$(CRYPTO_UTILS_PATH)/build/aes/aes_cfb.o \
 
 INCLUDE_DIRS = -I$(CRYPTO_UTILS_PATH)/include
 
