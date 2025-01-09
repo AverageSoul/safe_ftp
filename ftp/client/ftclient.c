@@ -5,8 +5,9 @@
 #include "ecdh/ecdh_protocol.h"
 #include "ecdsa/ecdsa.h"
 #include "sha256/sha256.h"
+#include <stdint.h>
 #include <stdio.h>
-
+const char user_path[] = "./user/";
 int sock_control;
 
 /**
@@ -208,12 +209,20 @@ int ftclient_send_cmd(struct command *cmd) {
 void ftclient_login() {
   struct command cmd;
   char user[256];
+  char keypath[MAXSIZE];
   memset(user, 0, 256);
+  uint8_t private_key[32];
 
   // Get username from user
-  printf("Name: ");
-  fflush(stdout);
-  read_input(user, 256);
+  while (1) {
+    printf("Name: ");
+    fflush(stdout);
+    read_input(user, 256);
+
+    sprintf(keypath, "./users/%s", user);
+    if (read_hex_file_to_bytes(keypath, private_key, sizeof(private_key)) != -1)
+      break;
+  }
 
   // Send USER command to server
   strcpy(cmd.code, "USER");
@@ -223,21 +232,37 @@ void ftclient_login() {
   // Wait for go-ahead to send password
   int wait;
   recv(sock_control, &wait, sizeof wait, 0);
+  uint8_t rnd[32];
+  recv(sock_control, rnd, 32, 0);
 
+  printf("client received rnd: ");
+  print_bytes(rnd, 32);
+  puts("");
+
+  ECurve curve;
+  ecdsa_init_context(&curve);
+  ECDSASignature signature;
+
+  ecdsa_sign(&curve, private_key, sizeof(private_key), rnd, sizeof(rnd),
+             &signature);
   // Get password from user
-  fflush(stdout);
-  char *pass = getpass("Password: ");
 
   // Send PASS command to server
-  strcpy(cmd.code, "PASS");
-  strcpy(cmd.arg, pass);
+  strcpy(cmd.code, "SIGN");
+  memcpy(cmd.arg, (void *)&signature, sizeof(signature));
+  printf("client sending signature: ");
+  print_bytes(signature.r, sizeof(signature.r));
+  puts("");
+  print_bytes(signature.s, sizeof(signature.s));
+  puts("");
+
   ftclient_send_cmd(&cmd);
 
   // wait for response
   int retcode = read_reply();
   switch (retcode) {
   case 430:
-    printf("Invalid username/password.\n");
+    printf("Invalid username/private_key.\n");
     exit(0);
   case 230:
     printf("Successful login.\n");
@@ -380,9 +405,7 @@ int main(int argc, char *argv[]) {
   print_reply(read_reply());
 
   /* Get name and password and send to server */
-  /*
-        ftclient_login();
-  */
+  ftclient_login();
 
   // TODO: Sign
   while (1) { // loop until user types quit

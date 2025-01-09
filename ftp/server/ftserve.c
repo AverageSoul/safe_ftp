@@ -1,4 +1,5 @@
 #include "ftserve.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -9,6 +10,7 @@
 #include "ecdh/ecdh_protocol.h"
 #include "ecdsa/ecdsa.h"
 #include "sha256/sha256.h"
+#include <time.h>
 const char root_path[] = "./uploads/";
 
 int main(int argc, char *argv[]) {
@@ -300,16 +302,23 @@ int ftserve_check_user(char *user, char *pass) {
   fclose(fd);
   return auth;
 }
-
+void generate_random_256bit(mpz_t result) {
+  gmp_randstate_t state;
+  gmp_randinit_default(state);
+  gmp_randseed_ui(state, time(NULL)); // 使用当前时间作为随机种子
+  mpz_urandomb(result, state, 256);   // 生成256位随机数
+  gmp_randclear(state);
+}
 /**
  * Log in connected client
  */
+
 int ftserve_login(int sock_control) {
   char buf[MAXSIZE];
-  char user[MAXSIZE];
-  char pass[MAXSIZE];
-  memset(user, 0, MAXSIZE);
-  memset(pass, 0, MAXSIZE);
+  char user[MAXSIZE / 2];
+  char keypath[MAXSIZE];
+  ECDSASignature signature;
+  memset(user, 0, MAXSIZE / 2);
   memset(buf, 0, MAXSIZE);
 
   // Wait to recieve username
@@ -323,23 +332,50 @@ int ftserve_login(int sock_control) {
   while (buf[i] != 0)
     user[n++] = buf[i++];
 
-  // tell client we're ready for password
+  // tell client we're ready to send rnd
   send_response(sock_control, 331);
 
-  // Wait to recieve password
+  mpz_t rnd;
+  mpz_init(rnd);
+  generate_random_256bit(rnd);
+  size_t count = 32;
+  unsigned char rnd_buffer[32];
+  mpz_export(rnd_buffer, &count, 1, 1, 0, 0, rnd);
+
+  printf("server sending rnd: ");
+  print_bytes(rnd_buffer, 32);
+  puts("");
+  if (send(sock_control, rnd_buffer, count, 0) < 0) {
+    perror("Error sending random number");
+  }
+
+  // Wait to receieve sign
   memset(buf, 0, MAXSIZE);
   if ((recv_data(sock_control, buf, sizeof(buf))) == -1) {
     perror("recv error\n");
     exit(1);
   }
 
-  i = 5;
-  n = 0;
-  while (buf[i] != 0) {
-    pass[n++] = buf[i++];
-  }
+  memcpy(&signature, buf + 5, sizeof(signature));
 
-  return (ftserve_check_user(user, pass));
+  printf("server received signature: ");
+  print_bytes(signature.r, sizeof(signature.r));
+  puts("");
+  print_bytes(signature.s, sizeof(signature.s));
+  puts("");
+
+  uint8_t public_key[PUBKEY_SERIALIZED_LEN];
+  sprintf(keypath, "./users/%s.pub", user);
+  if (read_hex_file_to_bytes(keypath, public_key, sizeof(public_key)) == -1)
+    return -1;
+
+  ECurve curve;
+  ecdsa_init_context(&curve);
+
+  if (ecdsa_verify(&curve, public_key, sizeof(public_key), rnd_buffer,
+                   sizeof(rnd_buffer), &signature))
+    return -1;
+  return 1;
 }
 
 /**
@@ -440,14 +476,12 @@ void ftserve_process(int sock_control) {
   send_response(sock_control, 220);
 
   // Authenticate user
-  /*
-        if (ftserve_login(sock_control) == 1) {
-                send_response(sock_control, 230);
-        } else {
-                send_response(sock_control, 430);
-                exit(0);
-        }
-  */
+  if (ftserve_login(sock_control) == 1) {
+    send_response(sock_control, 230);
+  } else {
+    send_response(sock_control, 430);
+    exit(0);
+  }
 
   // TODO: Sign
 

@@ -169,3 +169,33 @@ void print_bytes(const unsigned char *data, size_t size) {
   }
   printf("\n");
 }
+int read_hex_file_to_bytes(const char *filename, uint8_t *buffer, size_t size) {
+  FILE *file = fopen(filename, "r");
+  if (file == NULL) {
+    printf("file: %s", filename);
+    perror("Error opening key file");
+    return -1;
+  }
+
+  fseek(file, 0, SEEK_END);
+  long file_size = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  char *hex_buffer = (char *)malloc(file_size + 1);
+  if (hex_buffer == NULL) {
+    perror("Memory allocation error");
+    fclose(file);
+    return -1;
+  }
+
+  fread(hex_buffer, 1, file_size, file);
+  hex_buffer[file_size] = '\0';
+
+  for (size_t i = 0; i < size; i++) {
+    sscanf(&hex_buffer[i * 2], "%2hhx", buffer + i);
+  }
+
+  free(hex_buffer);
+  fclose(file);
+  return 0;
+}

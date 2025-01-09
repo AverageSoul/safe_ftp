@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <netdb.h> // getaddrinfo()
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,4 +76,6 @@ void read_input(char *buffer, int size);
 void split_mpz_t(mpz_t shared, unsigned char *high, unsigned char *low);
 
 void print_bytes(const unsigned char *data, size_t size);
+
+int read_hex_file_to_bytes(const char *filename, uint8_t *buffer, size_t size);
 #endif
