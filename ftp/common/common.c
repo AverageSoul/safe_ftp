@@ -145,28 +145,6 @@ void read_input(char *buffer, int size) {
   }
 }
 
-void init_curve(ECurve *curve) {
-  ec_init_curve(curve);
-
-  // 设置曲线参数
-  mpz_set_str(
-      curve->p,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16);
-  mpz_set_ui(curve->a, 0);
-  mpz_set_ui(curve->b, 7);
-  mpz_set_str(
-      curve->n,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
-
-  // 设置基点G
-  mpz_set_str(
-      curve->G.x,
-      "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798", 16);
-  mpz_set_str(
-      curve->G.y,
-      "483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8", 16);
-  curve->G.infinity = 0;
-}
 void split_mpz_t(mpz_t shared, unsigned char *high, unsigned char *low) {
   // 获取 256 位整数的字节数
   size_t count = (mpz_sizeinbase(shared, 2) + 7) / 8;

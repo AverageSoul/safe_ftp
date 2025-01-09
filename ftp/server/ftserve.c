@@ -125,7 +125,6 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
  * control message over control connection
  */
 
-// TODO: Decrypt
 // TODO: Check the sign
 void ftserve_put(int sock_control, int sock_data, char *filename) {
   FILE *fd = NULL;
@@ -382,27 +381,7 @@ int ftserve_recv_cmd(int sock_control, char *cmd, char *arg) {
 
 int server_exchange_key(mpz_t *shared, int sock_control) {
   ECurve curve;
-  ec_init_curve(&curve);
-
-  // 设置曲线参数
-  mpz_set_str(
-      curve.p,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16);
-  mpz_set_ui(curve.a, 0);
-  mpz_set_ui(curve.b, 7);
-  mpz_set_str(
-      curve.n,
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16);
-
-  // 设置基点G
-  mpz_set_str(
-      curve.G.x,
-      "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798", 16);
-  mpz_set_str(
-      curve.G.y,
-      "483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8", 16);
-  curve.G.infinity = 0;
-
+  ecdh_init_context(&curve);
   // Alice的密钥对
   mpz_t alice_private;
   ECPoint alice_public;
@@ -442,6 +421,10 @@ int server_exchange_key(mpz_t *shared, int sock_control) {
   // 验证共享密钥是否相同
   gmp_printf("Shared secret: %Zx\n", alice_shared);
   mpz_set(*shared, alice_shared);
+
+  ecdh_free_context(&curve);
+  ec_clear_point(&alice_public);
+  ec_clear_point(&bob_public);
 
   return 0;
 }

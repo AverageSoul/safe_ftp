@@ -287,7 +287,7 @@ int ftclient_put(int data_sock, int sock_control, char *arg) {
 int client_exchange_key(mpz_t *shared) {
   printf("key exchange begins\n");
   ECurve curve;
-  init_curve(&curve);
+  ecdh_init_context(&curve);
   printf("curve inited successfully\n");
   // Bob的密钥对
   mpz_t bob_private;
@@ -327,6 +327,9 @@ int client_exchange_key(mpz_t *shared) {
   gmp_printf("Shared secret: %Zx\n", bob_shared);
   mpz_set(*shared, bob_shared);
 
+  ecdh_free_context(&curve);
+  ec_clear_point(&alice_public);
+  ec_clear_point(&bob_public);
   return 0;
 }
 
