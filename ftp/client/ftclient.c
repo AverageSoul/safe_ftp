@@ -102,11 +102,12 @@ int ftclient_get(int data_sock, int sock_control, char *arg) {
 
   mpz_t shared;
   client_exchange_key(&shared);
+  split_mpz_t(shared, key, iv);
   FILE *fd = fopen(arg, "w");
 
-  split_mpz_t(shared, key, iv);
   while ((size = recv(data_sock, cipher, MAXSIZE, 0)) > 0) {
     aes_cfb_decrypt(cipher, size, key, iv, data);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
     printf("received cipher: ");
     print_bytes(cipher, size);
     puts("");
@@ -252,8 +253,16 @@ void ftclient_login() {
  */
 // TODO: Sign the file
 int ftclient_put(int data_sock, int sock_control, char *arg) {
-  char data[MAXSIZE];
+  unsigned char data[MAXSIZE];
+  unsigned char cipher[MAXSIZE];
+  unsigned char key[AES_KEY_SIZE];
+  unsigned char iv[AES_KEY_SIZE];
   int size;
+
+  mpz_t shared;
+  client_exchange_key(&shared);
+  split_mpz_t(shared, key, iv);
+
   FILE *fd = fopen(arg, "r");
 
   if (!fd) {
@@ -262,7 +271,9 @@ int ftclient_put(int data_sock, int sock_control, char *arg) {
   }
 
   while ((size = fread(data, 1, MAXSIZE, fd)) > 0) {
-    if (send(data_sock, data, size, 0) < 0) {
+    aes_cfb_encrypt(data, size, key, iv, cipher);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
+    if (send(data_sock, cipher, size, 0) < 0) {
       perror("Error sending file");
       fclose(fd);
       return -1;

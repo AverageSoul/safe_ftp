@@ -102,6 +102,7 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
       }
 
       aes_cfb_encrypt(data, num_read, key, iv, cipher);
+      memcpy(iv, cipher, AES_BLOCK_SIZE);
 
       printf("cipher: ");
       print_bytes(cipher, num_read);
@@ -119,6 +120,55 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
   }
 }
 
+/**
+ * Receive file specified in filename over data connection, sending
+ * control message over control connection
+ */
+
+// TODO: Decrypt
+// TODO: Check the sign
+void ftserve_put(int sock_control, int sock_data, char *filename) {
+  FILE *fd = NULL;
+  unsigned char data[MAXSIZE];
+  unsigned char cipher[MAXSIZE];
+  char filepath[MAXSIZE + 10];
+  unsigned char key[AES_KEY_SIZE];
+  unsigned char iv[AES_KEY_SIZE];
+  strcpy(filepath, root_path);
+
+  int size;
+
+  if (strchr(filename, '/')) {
+    send_response(sock_control, 550);
+    return;
+  }
+  strncat(filepath, filename, 512);
+  mpz_t shared;
+  server_exchange_key(&shared, sock_control);
+  split_mpz_t(shared, key, iv);
+
+  fd = fopen(filename, "w");
+
+  if (!fd) {
+    // send error code (550 Requested action not taken)
+    send_response(sock_control, 550);
+  } else {
+    // send okay (150 File status okay)
+    send_response(sock_control, 150);
+
+    while ((size = recv(sock_data, cipher, MAXSIZE, 0)) > 0) {
+
+      aes_cfb_decrypt(cipher, size, key, iv, data);
+      memcpy(iv, cipher, AES_BLOCK_SIZE);
+      fwrite(data, 1, size, fd);
+    }
+
+    // send message: 226: closing conn, file transfer successful
+    send_response(sock_control, 226);
+
+    fclose(fd);
+  }
+}
 /**
  * Send list of files in current directory
  * over data connection
@@ -445,44 +495,5 @@ void ftserve_process(int sock_control) {
       // Close data connection
       close(sock_data);
     }
-  }
-}
-/**
- * Receive file specified in filename over data connection, sending
- * control message over control connection
- */
-
-// TODO: Decrypt
-// TODO: Check the sign
-void ftserve_put(int sock_control, int sock_data, char *filename) {
-  FILE *fd = NULL;
-  char data[MAXSIZE];
-  char filepath[MAXSIZE + 10];
-  strcpy(filepath, root_path);
-
-  int size;
-
-  if (strchr(filename, '/')) {
-    send_response(sock_control, 550);
-    return;
-  }
-  strncat(filepath, filename, 512);
-  fd = fopen(filename, "w");
-
-  if (!fd) {
-    // send error code (550 Requested action not taken)
-    send_response(sock_control, 550);
-  } else {
-    // send okay (150 File status okay)
-    send_response(sock_control, 150);
-
-    while ((size = recv(sock_data, data, MAXSIZE, 0)) > 0) {
-      fwrite(data, 1, size, fd);
-    }
-
-    // send message: 226: closing conn, file transfer successful
-    send_response(sock_control, 226);
-
-    fclose(fd);
   }
 }
