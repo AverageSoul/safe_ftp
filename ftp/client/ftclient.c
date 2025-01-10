@@ -7,7 +7,9 @@
 #include "sha256/sha256.h"
 #include <stdint.h>
 #include <stdio.h>
-const char user_path[] = "./user/";
+const char user_path[] = "./users/";
+const char server_key_path[] = "./server/server.pub";
+uint8_t server_public_key[PUBKEY_SERIALIZED_LEN];
 int sock_control;
 
 /**
@@ -202,6 +204,7 @@ int ftclient_send_cmd(struct command *cmd) {
   return 0;
 }
 
+uint8_t user_private_key[32];
 /**
  * Get login details from user and
  * send to server for authentication
@@ -272,6 +275,7 @@ void ftclient_login() {
     exit(1);
     break;
   }
+  memcpy(user_private_key, private_key, sizeof(private_key));
 }
 /**
  * Do put <filename> command
@@ -334,9 +338,18 @@ int client_exchange_key(mpz_t *shared) {
   size_t length = sizeof(public);
 
   ecdh_serialize_pubkey(&bob_public, public, sizeof(public));
+  ECDSASignature pub_sign;
+  ecdsa_sign(&curve, user_private_key, 32, public, sizeof(public), &pub_sign);
+
   if (send(sock_control, public, length, 0) < 0) {
     close(sock_control);
     printf("exchange key: send public failed\n");
+    exit(1);
+  }
+
+  if (send(sock_control, &pub_sign, sizeof(pub_sign), 0) < 0) {
+    close(sock_control);
+    printf("exchange key: send public sign failed\n");
     exit(1);
   }
   printf("receiving public...\n");
@@ -344,7 +357,17 @@ int client_exchange_key(mpz_t *shared) {
     perror("exchange key: recv key error\n");
     return -1;
   }
-
+  if (recv(sock_control, &pub_sign, sizeof(pub_sign), 0) < 0) {
+    close(sock_control);
+    printf("exchange key: recv public sign failed\n");
+    exit(1);
+  }
+  if (ecdsa_verify(&curve, server_public_key, PUBKEY_SERIALIZED_LEN, public,
+                   PUBKEY_SERIALIZED_LEN, &pub_sign)) {
+    close(sock_control);
+    printf("exchange key: server public sign verification failed\n");
+    exit(1);
+  }
   ecdh_deserialize_pubkey(&curve, &alice_public, public, sizeof(public));
   gmp_printf("server public: %Zx %Zx\n", alice_public.x, alice_public.y);
   compute_shared_secret(bob_shared, &alice_public, bob_private, &curve);
@@ -405,6 +428,12 @@ int main(int argc, char *argv[]) {
   print_reply(read_reply());
 
   /* Get name and password and send to server */
+
+  if (read_hex_file_to_bytes(server_key_path, server_public_key,
+                             sizeof(server_public_key)) == -1) {
+    perror("Error reading server public key");
+    exit(1);
+  }
   ftclient_login();
 
   // TODO: Sign

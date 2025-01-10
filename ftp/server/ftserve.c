@@ -10,9 +10,11 @@
 #include "ecdh/ecdh_protocol.h"
 #include "ecdsa/ecdsa.h"
 #include "sha256/sha256.h"
+#include <sys/types.h>
 #include <time.h>
 const char root_path[] = "./uploads/";
-
+uint8_t server_private_key[32];
+const char private_key_path[] = "./server_private_key";
 int main(int argc, char *argv[]) {
   int sock_listen, sock_control, port, pid;
 
@@ -29,6 +31,11 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
+  if (read_hex_file_to_bytes(private_key_path, server_private_key,
+                             sizeof(server_private_key)) == -1) {
+    perror("Error reading server private key");
+    exit(1);
+  }
   while (1) { // wait for client request
 
     // create new socket for control connection
@@ -59,7 +66,8 @@ int main(int argc, char *argv[]) {
  * Handles case of null or invalid filename
  */
 // TODO: Encrypt
-void ftserve_retr(int sock_control, int sock_data, char *filename) {
+void ftserve_retr(int sock_control, int sock_data, char *filename,
+                  uint8_t *user_pub) {
   FILE *fd = NULL;
   unsigned char data[MAXSIZE];
   unsigned char cipher[MAXSIZE];
@@ -86,7 +94,7 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
     send_response(sock_control, 150);
 
     mpz_t shared;
-    server_exchange_key(&shared, sock_control);
+    server_exchange_key(&shared, sock_control, user_pub);
     split_mpz_t(shared, key, iv);
     printf("key: ");
     print_bytes(key, AES_KEY_SIZE);
@@ -128,7 +136,8 @@ void ftserve_retr(int sock_control, int sock_data, char *filename) {
  */
 
 // TODO: Check the sign
-void ftserve_put(int sock_control, int sock_data, char *filename) {
+void ftserve_put(int sock_control, int sock_data, char *filename,
+                 uint8_t *user_pub) {
   FILE *fd = NULL;
   unsigned char data[MAXSIZE];
   unsigned char cipher[MAXSIZE];
@@ -145,7 +154,7 @@ void ftserve_put(int sock_control, int sock_data, char *filename) {
   }
   strncat(filepath, filename, 512);
   mpz_t shared;
-  server_exchange_key(&shared, sock_control);
+  server_exchange_key(&shared, sock_control, user_pub);
   split_mpz_t(shared, key, iv);
 
   fd = fopen(filename, "w");
@@ -313,7 +322,7 @@ void generate_random_256bit(mpz_t result) {
  * Log in connected client
  */
 
-int ftserve_login(int sock_control) {
+int ftserve_login(int sock_control, uint8_t *user_pub) {
   char buf[MAXSIZE];
   char user[MAXSIZE / 2];
   char keypath[MAXSIZE];
@@ -369,6 +378,7 @@ int ftserve_login(int sock_control) {
   if (read_hex_file_to_bytes(keypath, public_key, sizeof(public_key)) == -1)
     return -1;
 
+  memcpy(user_pub, public_key, PUBKEY_SERIALIZED_LEN);
   ECurve curve;
   ecdsa_init_context(&curve);
 
@@ -415,7 +425,7 @@ int ftserve_recv_cmd(int sock_control, char *cmd, char *arg) {
   return rc;
 }
 
-int server_exchange_key(mpz_t *shared, int sock_control) {
+int server_exchange_key(mpz_t *shared, int sock_control, uint8_t *user_pub) {
   ECurve curve;
   ecdh_init_context(&curve);
   // Alice的密钥对
@@ -434,22 +444,42 @@ int server_exchange_key(mpz_t *shared, int sock_control) {
 
   uint8_t public[65];
   size_t length = sizeof(public);
-
+  ECDSASignature pub_sign;
   printf("receiving public...\n");
   if (recv(sock_control, public, length, 0) < 0) {
+    close(sock_control);
     perror("exchange key: recv key error\n");
     return -1;
   }
+  if (recv(sock_control, &pub_sign, sizeof(pub_sign), 0) < 0) {
 
+    close(sock_control);
+    perror("exchange key: recv key sign error\n");
+    return -1;
+  }
+  if (ecdsa_verify(&curve, user_pub, PUBKEY_SERIALIZED_LEN, public,
+                   PUBKEY_SERIALIZED_LEN, &pub_sign)) {
+
+    perror("exchange key: public key sign verification failed\n");
+    return -1;
+  }
   ecdh_deserialize_pubkey(&curve, &bob_public, public, sizeof(public));
   gmp_printf("received client public: %Zx %Zx\n", bob_public.x, bob_public.y);
 
   ecdh_serialize_pubkey(&alice_public, public, sizeof(public));
+
+  ecdsa_sign(&curve, server_private_key, 32, public, sizeof(public), &pub_sign);
   if (send(sock_control, public, length, 0) < 0) {
     close(sock_control);
     printf("exchange key: send public failed\n");
     exit(1);
   }
+  if (send(sock_control, &pub_sign, sizeof(pub_sign), 0) < 0) {
+    close(sock_control);
+    printf("exchange key: send public sign failed\n");
+    exit(1);
+  }
+
   printf("computing shared secret...\n");
   compute_shared_secret(alice_shared, &bob_public, alice_private, &curve);
   printf("key exchanged successfully\n");
@@ -471,12 +501,13 @@ void ftserve_process(int sock_control) {
   int sock_data;
   char cmd[5];
   char arg[MAXSIZE];
+  uint8_t user_pub[PUBKEY_SERIALIZED_LEN];
 
   // Send welcome message
   send_response(sock_control, 220);
 
   // Authenticate user
-  if (ftserve_login(sock_control) == 1) {
+  if (ftserve_login(sock_control, user_pub) == 1) {
     send_response(sock_control, 230);
   } else {
     send_response(sock_control, 430);
@@ -504,9 +535,9 @@ void ftserve_process(int sock_control) {
       if (strcmp(cmd, "LIST") == 0) { // Do list
         ftserve_list(sock_data, sock_control);
       } else if (strcmp(cmd, "RETR") == 0) { // Do get <filename>
-        ftserve_retr(sock_control, sock_data, arg);
+        ftserve_retr(sock_control, sock_data, arg, user_pub);
       } else if (strcmp(cmd, "STOR") == 0) { // Do put <filename>
-        ftserve_put(sock_control, sock_data, arg);
+        ftserve_put(sock_control, sock_data, arg, user_pub);
       }
 
       // Close data connection

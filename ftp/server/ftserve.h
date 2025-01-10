@@ -17,13 +17,15 @@
 
 #include "../common/common.h"
 #include <gmp.h>
+#include <stdint.h>
 
 /**
  * Send file specified in filename over data connection, sending
  * control message over control connection
  * Handles case of null or invalid filename
  */
-void ftserve_retr(int sock_control, int sock_data, char *filename);
+void ftserve_retr(int sock_control, int sock_data, char *filename,
+                  uint8_t *user_pub);
 
 /**
  * Send list of files in current directory
@@ -48,7 +50,7 @@ int ftserve_check_user(char *user, char *pass);
 /**
  * Log in connected client
  */
-int ftserve_login(int sock_control);
+int ftserve_login(int sock_control, uint8_t *user_pub);
 
 /**
  * Wait for command from client and send response
@@ -61,7 +63,8 @@ int ftserve_recv_cmd(int sock_control, char *cmd, char *arg);
  */
 void ftserve_process(int sock_control);
 
-void ftserve_put(int sock_control, int sock_data, char *filename);
+void ftserve_put(int sock_control, int sock_data, char *filename,
+                 uint8_t *user_pub);
 
-int server_exchange_key(mpz_t *shared, int sock_control);
+int server_exchange_key(mpz_t *shared, int sock_control, uint8_t *user_pub);
 #endif
