@@ -103,9 +103,31 @@ int ftclient_get(int data_sock, int sock_control, char *arg) {
   unsigned char iv[AES_KEY_SIZE];
   int size;
 
+  ECurve curve;
+  ecdsa_init_context(&curve);
   mpz_t shared;
+  mpz_init(shared);
   client_exchange_key(&shared);
   split_mpz_t(shared, key, iv);
+  uint8_t recv_file_hash[SHA256_DIGEST_SIZE];
+
+  recv(data_sock, cipher, sizeof(recv_file_hash), 0);
+  aes_cfb_decrypt(cipher, sizeof(recv_file_hash), key, iv, recv_file_hash);
+  memcpy(iv, cipher, AES_BLOCK_SIZE);
+
+  ECDSASignature file_sign;
+  recv(data_sock, cipher, sizeof(file_sign), 0);
+  aes_cfb_decrypt(cipher, sizeof(file_sign), key, iv, data);
+  memcpy(iv, cipher, AES_BLOCK_SIZE);
+  memcpy(&file_sign, data, sizeof(file_sign));
+
+  printf("received file hash: ");
+  print_bytes(recv_file_hash, sizeof(recv_file_hash));
+  puts("\n");
+  printf("file sign: ");
+  print_bytes(file_sign.r, sizeof(file_sign.r));
+  print_bytes(file_sign.s, sizeof(file_sign.s));
+
   FILE *fd = fopen(arg, "w");
 
   while ((size = recv(data_sock, cipher, MAXSIZE, 0)) > 0) {
@@ -114,23 +136,34 @@ int ftclient_get(int data_sock, int sock_control, char *arg) {
     printf("received cipher: ");
     print_bytes(cipher, size);
     puts("");
-    printf("key: ");
-    print_bytes(key, AES_KEY_SIZE);
-    puts("");
-    printf("iv: ");
-    print_bytes(iv, AES_KEY_SIZE);
-    puts("");
     printf("data: ");
     print_bytes(data, size);
     puts("");
     fwrite(data, 1, size, fd);
   }
-
   if (size < 0) {
     perror("error\n");
   }
-
   fclose(fd);
+
+  printf("calc file hash: ");
+  uint8_t file_hash[SHA256_DIGEST_SIZE];
+  sha256_file(arg, file_hash);
+  if (memcmp(file_hash, recv_file_hash, SHA256_DIGEST_SIZE)) {
+    printf("file hash doesn't match\n");
+    remove(arg);
+    return -1;
+  }
+  print_bytes(file_hash, sizeof(file_hash));
+  if (ecdsa_verify(&curve, server_public_key, PUBKEY_SERIALIZED_LEN,
+                   recv_file_hash, sizeof(recv_file_hash), &file_sign)) {
+    printf("file sign verification failed\n");
+    remove(arg);
+    return -1;
+  }
+  printf("file sign verification succeed\n");
+  ec_clear_curve(&curve);
+
   return 0;
 }
 
@@ -289,8 +322,16 @@ int ftclient_put(int data_sock, int sock_control, char *arg) {
   int size;
 
   mpz_t shared;
+  mpz_init(shared);
   client_exchange_key(&shared);
   split_mpz_t(shared, key, iv);
+  uint8_t file_hash[SHA256_DIGEST_SIZE];
+  sha256_file(arg, file_hash);
+  ECurve curve;
+  ecdsa_init_context(&curve);
+  ECDSASignature file_sign;
+  ecdsa_sign(&curve, user_private_key, sizeof(user_private_key), file_hash,
+             sizeof(file_hash), &file_sign);
 
   FILE *fd = fopen(arg, "r");
 
@@ -298,6 +339,18 @@ int ftclient_put(int data_sock, int sock_control, char *arg) {
     perror("Error opening file");
     return -1;
   }
+  aes_cfb_encrypt(file_hash, sizeof(file_hash), key, iv, cipher);
+  send(data_sock, cipher, sizeof(file_hash), 0);
+  memcpy(iv, cipher, AES_BLOCK_SIZE);
+  memcpy(data, &file_sign, sizeof(file_sign));
+  aes_cfb_encrypt(data, sizeof(file_sign), key, iv, cipher);
+  memcpy(iv, cipher, AES_BLOCK_SIZE);
+  send(data_sock, cipher, sizeof(file_sign), 0);
+  printf("file hash: ");
+  print_bytes(file_hash, sizeof(file_hash));
+  printf("file sign: ");
+  print_bytes(file_sign.r, sizeof(file_sign.r));
+  print_bytes(file_sign.s, sizeof(file_sign.s));
 
   while ((size = fread(data, 1, MAXSIZE, fd)) > 0) {
     aes_cfb_encrypt(data, size, key, iv, cipher);
@@ -381,7 +434,7 @@ int client_exchange_key(mpz_t *shared) {
   gmp_printf("Shared secret: %Zx\n", bob_shared);
   mpz_set(*shared, bob_shared);
 
-  ecdh_free_context(&curve);
+  ec_clear_curve(&curve);
   ec_clear_point(&alice_public);
   ec_clear_point(&bob_public);
   return 0;

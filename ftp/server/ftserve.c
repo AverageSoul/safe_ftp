@@ -84,6 +84,13 @@ void ftserve_retr(int sock_control, int sock_data, char *filename,
   strncat(filepath, filename, 512);
 
   fd = fopen(filepath, "r");
+  uint8_t file_hash[SHA256_DIGEST_SIZE];
+  sha256_file(filepath, file_hash);
+  ECurve curve;
+  ecdsa_init_context(&curve);
+  ECDSASignature file_sign;
+  ecdsa_sign(&curve, server_private_key, sizeof(server_private_key), file_hash,
+             sizeof(file_hash), &file_sign);
 
   if (!fd) {
     // send error code (550 Requested action not taken)
@@ -102,10 +109,22 @@ void ftserve_retr(int sock_control, int sock_data, char *filename,
     printf("key: ");
     print_bytes(key, AES_KEY_SIZE);
     puts("");
-
     printf("iv: ");
     print_bytes(iv, AES_KEY_SIZE);
     puts("");
+
+    aes_cfb_encrypt(file_hash, sizeof(file_hash), key, iv, cipher);
+    send(sock_data, cipher, sizeof(file_hash), 0);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
+    memcpy(data, &file_sign, sizeof(file_sign));
+    aes_cfb_encrypt(data, sizeof(file_sign), key, iv, cipher);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
+    send(sock_data, cipher, sizeof(file_sign), 0);
+    printf("file hash: ");
+    print_bytes(file_hash, sizeof(file_hash));
+    printf("file sign: ");
+    print_bytes(file_sign.r, sizeof(file_sign.r));
+    print_bytes(file_sign.s, sizeof(file_sign.s));
 
     do {
       num_read = fread(data, 1, MAXSIZE, fd);
@@ -117,6 +136,8 @@ void ftserve_retr(int sock_control, int sock_data, char *filename,
       aes_cfb_encrypt(data, num_read, key, iv, cipher);
       memcpy(iv, cipher, AES_BLOCK_SIZE);
 
+      if (!num_read)
+        break;
       printf("cipher: ");
       print_bytes(cipher, num_read);
       puts("");
@@ -131,6 +152,7 @@ void ftserve_retr(int sock_control, int sock_data, char *filename,
 
     fclose(fd);
   }
+  ecdh_free_context(&curve);
 }
 
 /**
@@ -169,16 +191,53 @@ void ftserve_put(int sock_control, int sock_data, char *filename,
     // send okay (150 File status okay)
     send_response(sock_control, 150);
 
+    ECurve curve;
+    ecdsa_init_context(&curve);
+    uint8_t recv_file_hash[SHA256_DIGEST_SIZE];
+
+    recv(sock_data, cipher, sizeof(recv_file_hash), 0);
+    aes_cfb_decrypt(cipher, sizeof(recv_file_hash), key, iv, recv_file_hash);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
+
+    ECDSASignature file_sign;
+    recv(sock_data, cipher, sizeof(file_sign), 0);
+    aes_cfb_decrypt(cipher, sizeof(file_sign), key, iv, data);
+    memcpy(iv, cipher, AES_BLOCK_SIZE);
+    memcpy(&file_sign, data, sizeof(file_sign));
+
+    printf("received file hash: ");
+    print_bytes(recv_file_hash, sizeof(recv_file_hash));
+    puts("\n");
+    printf("file sign: ");
+    print_bytes(file_sign.r, sizeof(file_sign.r));
+    print_bytes(file_sign.s, sizeof(file_sign.s));
+
     while ((size = recv(sock_data, cipher, MAXSIZE, 0)) > 0) {
 
       aes_cfb_decrypt(cipher, size, key, iv, data);
       memcpy(iv, cipher, AES_BLOCK_SIZE);
       fwrite(data, 1, size, fd);
     }
+    printf("calc file hash: ");
+    uint8_t file_hash[SHA256_DIGEST_SIZE];
+    sha256_file(filepath, file_hash);
+    if (memcmp(file_hash, recv_file_hash, SHA256_DIGEST_SIZE)) {
+      printf("file hash doesn't match\n");
+      remove(filepath);
+      return;
+    }
+    print_bytes(file_hash, sizeof(file_hash));
+    if (ecdsa_verify(&curve, user_pub, PUBKEY_SERIALIZED_LEN, recv_file_hash,
+                     sizeof(recv_file_hash), &file_sign)) {
+      printf("file sign verification failed\n");
+      remove(filepath);
+      return;
+    }
+    printf("file sign verification succeed\n");
 
     // send message: 226: closing conn, file transfer successful
     send_response(sock_control, 226);
-
+    ecdh_free_context(&curve);
     fclose(fd);
   }
 }
