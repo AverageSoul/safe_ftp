@@ -38,13 +38,11 @@ server:
 
 ```
 
-```
-
 ### Usage
 
 build crypto_utils first
 
-```
+```sh
 
  cd crypto_utils
  make
@@ -53,17 +51,14 @@ build crypto_utils first
 
 To compile and link ftserve:
 
-```
-
+```sh
  cd ftp/server/
  make
-
 ```
 
 To compile and link ftclient:
 
-```
-
+```sh
  cd ftp/client/
  make
 
@@ -71,33 +66,21 @@ To compile and link ftclient:
 
 To run ftserve:
 
-```
-
+```sh
  server/ftserve PORTNO
-
 ```
 
 To run ftclient:
 
-```
-
- $ client/ftclient HOSTNAME PORTNO
-
- Commands:
-  list
-  put <filename>
-  get <filename>
-  quit
-
+```sh
+ client/ftclient HOSTNAME PORTNO
 ```
 
 Available commands:
 
-```
-
+```txt
 list            - retrieve list of files in the current remote directory
 get <filename>  - get the specified file
 put <filename>  - put the specified file
 quit            - end the ftp session
-
 ```
