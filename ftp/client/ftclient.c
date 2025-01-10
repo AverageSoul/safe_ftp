@@ -352,6 +352,12 @@ int client_exchange_key(mpz_t *shared) {
     printf("exchange key: send public sign failed\n");
     exit(1);
   }
+  int rc = read_reply();
+  if (rc == 1001) {
+    printf("exchange key: public sign verification failed\n");
+    exit(1);
+  }
+
   printf("receiving public...\n");
   if (recv(sock_control, public, length, 0) < 0) {
     perror("exchange key: recv key error\n");

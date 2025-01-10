@@ -94,7 +94,10 @@ void ftserve_retr(int sock_control, int sock_data, char *filename,
     send_response(sock_control, 150);
 
     mpz_t shared;
-    server_exchange_key(&shared, sock_control, user_pub);
+    if (server_exchange_key(&shared, sock_control, user_pub)) {
+      return;
+    }
+
     split_mpz_t(shared, key, iv);
     printf("key: ");
     print_bytes(key, AES_KEY_SIZE);
@@ -460,9 +463,11 @@ int server_exchange_key(mpz_t *shared, int sock_control, uint8_t *user_pub) {
   if (ecdsa_verify(&curve, user_pub, PUBKEY_SERIALIZED_LEN, public,
                    PUBKEY_SERIALIZED_LEN, &pub_sign)) {
 
+    send_response(sock_control, 1001);
     perror("exchange key: public key sign verification failed\n");
     return -1;
   }
+  send_response(sock_control, 1000);
   ecdh_deserialize_pubkey(&curve, &bob_public, public, sizeof(public));
   gmp_printf("received client public: %Zx %Zx\n", bob_public.x, bob_public.y);
 
@@ -472,12 +477,12 @@ int server_exchange_key(mpz_t *shared, int sock_control, uint8_t *user_pub) {
   if (send(sock_control, public, length, 0) < 0) {
     close(sock_control);
     printf("exchange key: send public failed\n");
-    exit(1);
+    return -1;
   }
   if (send(sock_control, &pub_sign, sizeof(pub_sign), 0) < 0) {
     close(sock_control);
     printf("exchange key: send public sign failed\n");
-    exit(1);
+    return -1;
   }
 
   printf("computing shared secret...\n");
